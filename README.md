@@ -1,4 +1,16 @@
-﻿# C++17 複数カメラ制御サンプル
+# C++17 複数カメラ制御サンプル
+
+## フォルダ構成
+
+```text
+camera-if/
+├── CMakeLists.txt
+├── README.md
+├── include/                ヘッダー
+├── src/                    実装とサンプルのmain.cpp
+├── tests/                  camera_tests.cpp
+└── archives/               既存の設計サンプルZIP
+```
 
 ## 構成と責務
 
@@ -13,7 +25,7 @@ Request.idは遅延イベントとの混同を避けるため、プロセス内�
 - CameraActor: カメラ状態、現在のProcedure、要求待ち行列、WriteSessionを所有する。
 - ProcedurePorts: system / device / stream / respondの具体的な接続点。IActionDispatcherは導入しない。
 
-ProcedureはActorが所有する進行状態。状態遷移はCameraActor.cppにまとめ、各段階で必要なPortだけを呼ぶ。
+ProcedureはActorが所有する進行状態。状態遷移はsrc/CameraActor.cppにまとめ、各段階で必要なPortだけを呼ぶ。
 Workerには手続き判断やクライアント要求をまたぐ業務状態を持たせない。
 SDKハンドルはWorkerのローカル変数とし、生成から破棄まで所有スレッドで実行する。
 DummySdkはスレッド所有をassertで確認する。Workerはキューを閉じ、joinして終了する。
