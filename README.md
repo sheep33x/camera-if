@@ -1,46 +1,60 @@
-# C++17 カメラ制御アーキテクチャ・ダミーサンプル
+﻿# C++17 複数カメラ制御サンプル
 
-通信部と実SDKの実装を除いた、**クラスの役割とスレッドの所有関係を読むためのサンプル**です。実運用向けではなく、停止処理などは意図的に省略しています。
+## 構成と責務
 
-## ファイル構成
+Coordinatorを実行する1スレッドが、すべてのCameraActorをイベント駆動で実行する。
+Actor自身にはスレッドを持たせない。addCamera / runOnceは同じスレッドから呼ぶ。
+通信側はpostRequest、Worker側はpostEventでスレッドセーフなキューへ投入する。
+Request.idは遅延イベントとの混同を避けるため、プロセス内で再利用しないこと。
 
-- `include/Types.hpp` — 要求・イベント・アクションの型
-- `include/ThreadQueue.hpp` — スレッド間キュー
-- `include/CommandHandlers.hpp`, `src/CommandHandlers.cpp` — A/B/C/Dの共通ワークフロー
-- `include/Coordinator.hpp`, `src/Coordinator.cpp` — Handler生成、イベント配信、応答ルート
-- `include/CameraScheduler.hpp` — 制御/受信ワーカーへの振り分け
-- `include/Workers.hpp`, `src/Workers.cpp` — カメラごとに制御スレッドと受信スレッドを各1本
-- `include/DummySdk.hpp` — 制御用・受信用のダミーSDKハンドル
-- `include/CameraModel.hpp`, `src/CameraModel.cpp` — 機種別StrategyとRegisterMap
-- `src/main.cpp` — 通信の代わりに要求投入
+- SystemWorker: 全体に1本。システムSDKハンドルを生成・使用・破棄する。
+- DeviceWorker: カメラごとに1本。デバイスSDKとModelStrategyを使用する。
+- StreamWorker: カメラごとに1本。受信SDKを使用する。
+- CameraActor: カメラ状態、現在のProcedure、要求待ち行列、WriteSessionを所有する。
+- ProcedurePorts: system / device / stream / respondの具体的な接続点。IActionDispatcherは導入しない。
 
-## スレッドとSDKハンドル
+ProcedureはActorが所有する進行状態。状態遷移はCameraActor.cppにまとめ、各段階で必要なPortだけを呼ぶ。
+Workerには手続き判断やクライアント要求をまたぐ業務状態を持たせない。
+SDKハンドルはWorkerのローカル変数とし、生成から破棄まで所有スレッドで実行する。
+DummySdkはスレッド所有をassertで確認する。Workerはキューを閉じ、joinして終了する。
+Coordinatorの受信キューはすべてのWorkerより長く生存する。
 
-```text
-通信A/B相当 → Coordinator（イベント処理・Handlerの状態変更はここだけ）
-                    ├─ Camera 1 ─ ControlWorker thread ─ ControlSdkHandle ─ ModelAStrategy
-                    │           └ ReceiveWorker thread ─ ReceiveSdkHandle
-                    └─ Camera 2 ─ ControlWorker thread ─ ControlSdkHandle ─ ModelBStrategy
-                                └ ReceiveWorker thread ─ ReceiveSdkHandle
+## 手続き
+
+- A: System準備 → 設定 → 応答。
+- B: System準備 → 設定 → 撮影開始 → 受信開始 → 画像 → 受信停止完了 → 応答。
+- C: 実行中Bにcancelledを応答し、受信停止完了を待って応答。B以外の実行中要求には割り込まず待機する。
+- D Start: 明示的なsessionIdで開始し、受付完了に応答。SessionはActorに残る。
+- D Query: 同じsessionIdで状態を照会。要求IDや応答先は開始要求と異なってよい。
+
+通常要求はカメラごとに直列化する。異なるカメラは独立して進む。
+Cで中断されたBの遅延イベントは要求IDで除外する。
+停止完了より前に次のProcedureを開始しない。
+書き込み中のSessionがある場合、新規D Startを拒否する。
+サンプルではカメラごとに最新のSessionを1つ保持し、完了後の次回開始で置き換える。
+
+## ビルドと検証
+
+CMakeとC++17コンパイラが必要。
+
+```sh
+cmake -S . -B build
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
 ```
 
-制御SDKハンドルは**制御スレッド内で生成して使用**、受信SDKハンドルは**受信スレッド内で生成して使用**。HandlerはSDKを直接呼びません。Strategyは制御用SDKの操作内容（機種ごとのAPI選択、レジスタ、呼び出し順）を決めます。
+camera_sampleは2カメラに5要求を投入し、5応答を受けて終了する。
+camera_testsでは手続きの直列化、C割り込み、停止待ち、遅延イベント、カメラの取り違え、
+Sessionの開始・照会・競合、失敗応答、複数カメラ、Worker破棄を確認する。
 
-## コマンドの流れ
+## 実SDK統合時に必要な作業
 
-- **A**: Handler → ApplyConfig → ControlWorker → ControlDone → 応答
-- **B**: ApplyConfig → StartCapture → StartReceive → ImageArrived → 応答。受信待ち中にControlWorkerをブロックしない
-- **C**: 進行中のBをCancelledとして応答 → ReceiveWorkerへStopReceive → ReceiveStoppedでCに応答
-- **D**: 開始時はWriteAcceptedで即応答し、書き込み状態はワーカーに残る。後のD照会はWriteStatusで応答
-
-## 意図的な簡略化・製品化時に必要なこと
-
-1. **重要: スレッド終了処理は未実装**。現在のWorkerデストラクタの`detach()`は説明用の仮置きで、実行終了時の安全性を保証しません。実装では終了メッセージ、`join()`、SDKハンドル破棄順を必ず実装してください。
-2. **同一カメラのコマンド直列化は未実装**。Schedulerにカメラ単位の保留キューと許可条件を設けます。ただしCはB受信待ちに割り込めるようにします。
-3. **画像受信SDKのコールバック連携は未実装**。実際には受信SDKのコールバックで受信スレッドへ通知し、そこからCoordinatorへ`ImageArrived`を送ります。`postImage()`は疑似イベント入口です。
-4. **受信開始・停止の競合**、Bの遅延イベント、C実行時の停止完了前に次のBを開始しない制御が必要です。
-5. **Dの進捗**はダミーでWritingのままです。実際にはSDKの書き込み状態照会結果で更新し、WriteIdなどで対象書き込みを識別します。開始/照会は本来リクエストの明示的なフィールドで区別します（ここではrequestId偶奇で仮置き）。
-6. タイムアウト、SDK失敗、通信切断、レスポンスの送信スレッド、画像バッファ所有権、SDKのスレッドセーフ性は省略しています。
-7. Model Strategyの`Recipe`は**ログ文字列のみ**。実SDKでは制御スレッド上で共通SDK Driverに対してAPIを呼び分けます。
-
-**注意:** 構成把握のための擬似的なコードです。ビルド・動作確認済みの完成品として扱わないでください。
+現在は構成を検証するダミーであり、実SDKや通信処理は含まない。
+System準備はダミー操作で、実SDKの列挙・初期化・終了の具体的な寿命設計は別途必要。
+受信は非ブロッキングのダミーで、開始直後に画像イベントを1件発行する。
+ブロッキング受信待ちと別スレッドからの待ち解除はまだ実装していない。
+実SDKでは待ち解除専用の経路だけを例外として公開し、通常のSDK操作はStreamWorkerで行うこと。
+Dは次の照会でCompleteを返すダミーで、実際の進捗はSDK結果をEventに変換する。
+タイムアウト、SDK例外変換、失敗時の撮影・受信の復旧、終了時の未完了要求への応答、
+画像バッファ所有権、Sessionの永続化は未実装。
+stopはイベント受付を閉じるための終了APIであり、すべての手続きの完了を保証するAPIではない。

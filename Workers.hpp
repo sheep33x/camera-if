@@ -1,28 +1,36 @@
-#pragma once
-#include "Types.hpp"
-#include "ThreadQueue.hpp"
+﻿#pragma once
 #include "CameraModel.hpp"
+#include "ThreadQueue.hpp"
+#include "Types.hpp"
+#include <functional>
 #include <memory>
 #include <thread>
-#include <functional>
-class ControlWorker {
+// Members are initialized before the thread starts; destruction always joins.
+class SystemWorker {
     ThreadQueue<Action> tasks_;
-    std::thread thread_;
-    std::unique_ptr<CameraModelStrategy> model_;
     std::function<void(Event)> emit_;
-    void run(int cameraId);
+    std::thread thread_;
 public:
-    ControlWorker(int cameraId, std::unique_ptr<CameraModelStrategy> model, std::function<void(Event)> emit);
-    ~ControlWorker();
+    explicit SystemWorker(std::function<void(Event)> emit);
+    ~SystemWorker();
     void post(Action a) { tasks_.push(a); }
 };
-class ReceiveWorker {
+class DeviceWorker {
     ThreadQueue<Action> tasks_;
-    std::thread thread_;
+    std::unique_ptr<CameraModelStrategy> model_;
     std::function<void(Event)> emit_;
-    void run(int cameraId);
+    std::thread thread_;
 public:
-    ReceiveWorker(int cameraId, std::function<void(Event)> emit);
-    ~ReceiveWorker();
+    DeviceWorker(int id, std::unique_ptr<CameraModelStrategy> model, std::function<void(Event)> emit);
+    ~DeviceWorker();
+    void post(Action a) { tasks_.push(a); }
+};
+class StreamWorker {
+    ThreadQueue<Action> tasks_;
+    std::function<void(Event)> emit_;
+    std::thread thread_;
+public:
+    StreamWorker(int id, std::function<void(Event)> emit);
+    ~StreamWorker();
     void post(Action a) { tasks_.push(a); }
 };

@@ -1,21 +1,28 @@
-#pragma once
-#include "CameraScheduler.hpp"
-#include "CommandHandlers.hpp"
-#include "ThreadQueue.hpp"
+﻿#pragma once
+#include "Workers.hpp"
+#include "CameraActor.hpp"
 #include <map>
-#include <memory>
 #include <variant>
-struct ImageNotification { int cameraId; }; // SDK callback -> coordinator に変換する想定
-using CoordinatorMessage = std::variant<Request,Event,ImageNotification>;
+using CoordinatorMessage = std::variant<Request,Event>;
 class Coordinator {
+    // Inbox outlives workers, which may emit while joining during destruction.
     ThreadQueue<CoordinatorMessage> inbox_;
-    std::map<int,std::unique_ptr<CameraScheduler>> cameras_;
-    std::map<uint64_t,std::unique_ptr<ICommandHandler>> handlers_;
-    std::map<int,uint64_t> activeReceiveB_;
+    Respond respond_;
+    std::map<int,std::unique_ptr<CameraActor>> actors_;
+    SystemWorker system_;
+    struct CameraWorkers {
+        DeviceWorker device;
+        StreamWorker stream;
+        CameraWorkers(int id, std::unique_ptr<CameraModelStrategy> model, std::function<void(Event)> emit)
+            : device(id,std::move(model),emit), stream(id,emit) {}
+    };
+    std::map<int,std::unique_ptr<CameraWorkers>> workers_;
 public:
+    explicit Coordinator(Respond respond = {});
+    // addCamera and runOnce are called on one coordinator thread; post* are thread safe.
     void addCamera(int id, std::unique_ptr<CameraModelStrategy> model);
-    void postRequest(Request r) { inbox_.push(r); }
+    void postRequest(Request r) { inbox_.push(std::move(r)); }
     void postEvent(Event e) { inbox_.push(e); }
-    void postImage(int cameraId) { inbox_.push(ImageNotification{cameraId}); }
-    void runOnce(); // デモではmainから呼ぶ。実際は専用ループで回す。
+    bool runOnce();
+    void stop() { inbox_.close(); }
 };

@@ -1,16 +1,14 @@
-#pragma once
+﻿#pragma once
+#include <cassert>
 #include <string>
-#include <iostream>
-// 実際のSDKクラスではない。スレッド専有ハンドルのイメージを示す。
-class ControlSdkHandle {
-    int cameraId_;
+#include <thread>
+// Dummy handles enforce the same ownership rule as the future SDK adapters.
+class OwnedSdkHandle {
+    std::thread::id owner_ = std::this_thread::get_id();
 public:
-    explicit ControlSdkHandle(int cameraId) : cameraId_(cameraId) {}
-    void perform(const std::string& description) { std::cout << "[ControlSDK camera=" << cameraId_ << "] " << description << "\n"; }
+    void perform(const std::string&) { assert(owner_ == std::this_thread::get_id()); }
+    ~OwnedSdkHandle() { assert(owner_ == std::this_thread::get_id()); }
 };
-class ReceiveSdkHandle {
-    int cameraId_;
-public:
-    explicit ReceiveSdkHandle(int cameraId) : cameraId_(cameraId) {}
-    void perform(const std::string& description) { std::cout << "[ReceiveSDK camera=" << cameraId_ << "] " << description << "\n"; }
-};
+using SystemSdkHandle = OwnedSdkHandle;
+class ControlSdkHandle : public OwnedSdkHandle { public: explicit ControlSdkHandle(int) {} };
+class ReceiveSdkHandle : public OwnedSdkHandle { public: explicit ReceiveSdkHandle(int) {} };
