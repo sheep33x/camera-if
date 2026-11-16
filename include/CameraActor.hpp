@@ -1,8 +1,11 @@
 ﻿#pragma once
-#include "ProcedurePorts.hpp"
+#include "Types.hpp"
 #include <deque>
 #include <optional>
 #include <utility>
+class SystemWorker;
+class DeviceWorker;
+class StreamWorker;
 struct WriteSession { uint64_t id; WriteState state; };
 struct Procedure {
     enum class Stage { System, Config, Capture, Receive, Image, Stop, Write, Query } stage;
@@ -10,7 +13,10 @@ struct Procedure {
 };
 class CameraActor {
     int id_;
-    ProcedurePorts ports_;
+    SystemWorker& system_;
+    DeviceWorker& device_;
+    StreamWorker& stream_;
+    Respond respond_;
     std::deque<Request> pending_;
     std::optional<Procedure> procedure_;
     std::optional<WriteSession> session_;
@@ -18,7 +24,11 @@ class CameraActor {
     void startNext();
     void finish(const std::string& result);
 public:
-    CameraActor(int id, ProcedurePorts ports) : id_(id), ports_(std::move(ports)) {}
+    // Workers must outlive the actor. These calls enqueue work on their owner threads.
+    CameraActor(int id, SystemWorker& system, DeviceWorker& device,
+                StreamWorker& stream, Respond respond)
+        : id_(id), system_(system), device_(device), stream_(stream),
+          respond_(std::move(respond)) {}
     void onRequest(Request request);
     void onEvent(const Event& event);
 };

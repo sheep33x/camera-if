@@ -23,13 +23,13 @@ Request.idは遅延イベントとの混同を避けるため、プロセス内�
 - DeviceWorker: カメラごとに1本。デバイスSDKとModelStrategyを使用する。
 - StreamWorker: カメラごとに1本。受信SDKを使用する。
 - CameraActor: カメラ状態、現在のProcedure、要求待ち行列、WriteSessionを所有する。
-- ProcedurePorts: system / device / stream / respondの具体的な接続点。IActionDispatcherは導入しない。
+- CameraActorはSystemWorker・DeviceWorker・StreamWorkerへの参照を持ち、各Workerのpost()を直接呼ぶ。
 
-ProcedureはActorが所有する進行状態。状態遷移はsrc/CameraActor.cppにまとめ、各段階で必要なPortだけを呼ぶ。
+ProcedureはActorが所有する進行状態。状態遷移はsrc/CameraActor.cppにまとめ、各段階で担当WorkerのキューへActionを投入する。
 Workerには手続き判断やクライアント要求をまたぐ業務状態を持たせない。
 SDKハンドルはWorkerのローカル変数とし、生成から破棄まで所有スレッドで実行する。
 DummySdkはスレッド所有をassertで確認する。Workerはキューを閉じ、joinして終了する。
-Coordinatorの受信キューはすべてのWorkerより長く生存する。
+CoordinatorはActorを破棄してからWorkerを破棄する。受信キューはすべてのWorkerより長く生存する。
 
 ## 手続き
 
@@ -56,7 +56,7 @@ ctest --test-dir build -C Debug --output-on-failure
 ```
 
 camera_sampleは2カメラに5要求を投入し、5応答を受けて終了する。
-camera_testsでは手続きの直列化、C割り込み、停止待ち、遅延イベント、カメラの取り違え、
+camera_testsでは実Workerの完了イベントを順にActorへ渡し、手続きの直列化、C割り込み、停止待ち、遅延イベント、カメラの取り違え、
 Sessionの開始・照会・競合、失敗応答、複数カメラ、Worker破棄を確認する。
 
 ## 実SDK統合時に必要な作業

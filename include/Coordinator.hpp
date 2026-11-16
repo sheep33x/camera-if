@@ -8,7 +8,6 @@ class Coordinator {
     // Inbox outlives workers, which may emit while joining during destruction.
     ThreadQueue<CoordinatorMessage> inbox_;
     Respond respond_;
-    std::map<int,std::unique_ptr<CameraActor>> actors_;
     SystemWorker system_;
     struct CameraWorkers {
         DeviceWorker device;
@@ -17,6 +16,8 @@ class Coordinator {
             : device(id,std::move(model),emit), stream(id,emit) {}
     };
     std::map<int,std::unique_ptr<CameraWorkers>> workers_;
+    // Actors release their worker references before workers are destroyed.
+    std::map<int,std::unique_ptr<CameraActor>> actors_;
 public:
     explicit Coordinator(Respond respond = {});
     // addCamera and runOnce are called on one coordinator thread; post* are thread safe.

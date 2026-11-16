@@ -12,13 +12,10 @@ Coordinator::Coordinator(Respond respond)
 void Coordinator::addCamera(int id, std::unique_ptr<CameraModelStrategy> model) {
     if (!model || actors_.count(id)) throw std::invalid_argument("invalid or duplicate camera");
     auto workers = std::make_unique<CameraWorkers>(id,std::move(model),[this](Event e){ postEvent(e); });
-    auto* w = workers.get();
-    ProcedurePorts ports{
-        [this](Action a){ system_.post(a); },
-        [w](Action a){ w->device.post(a); },
-        [w](Action a){ w->stream.post(a); }, respond_};
+    auto actor = std::make_unique<CameraActor>(
+        id, system_, workers->device, workers->stream, respond_);
     workers_.emplace(id,std::move(workers));
-    actors_.emplace(id,std::make_unique<CameraActor>(id,std::move(ports)));
+    actors_.emplace(id,std::move(actor));
 }
 bool Coordinator::runOnce() {
     auto message = inbox_.pop();
